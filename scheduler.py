@@ -1,40 +1,74 @@
-import os
-import json
-from firebase_admin import credentials, initialize_app, db
-from datetime import datetime
-import pytz
+from textwrap import dedent
 
-# Load Firebase credentials from environment variable
-cred_json = os.getenv("FIREBASE_CRED_JSON")
-if not cred_json:
-    raise ValueError("Missing FIREBASE_CRED_JSON")
+# Full corrected scheduler.py content with consistent indentation (spaces only)
+scheduler_py_content = dedent("""
+    import os
+    import firebase_admin
+    from firebase_admin import credentials, db
+    from datetime import datetime, timedelta
+    import pytz
+    from encrypt_util import decrypt_string
+    from twilio.rest import Client
 
-cred_dict = json.loads(cred_json)
-cred = credentials.Certificate(cred_dict)
+    # Load environment variables
+    FIREBASE_CRED_JSON = os.getenv("FIREBASE_CRED_JSON")
+    FERNET_KEY = os.getenv("FERNET_KEY")
+    TWILIO_SID = os.getenv("TWILIO_SID")
+    TWILIO_TOKEN = os.getenv("TWILIO_TOKEN")
+    TWILIO_FROM = os.getenv("TWILIO_FROM")
 
-# Firebase Realtime Database URL
-database_url = os.getenv("FIREBASE_DB_URL") or "https://battery-dealer-portal.firebaseio.com"
+    if not FIREBASE_CRED_JSON:
+        raise ValueError("Missing FIREBASE_CRED_JSON")
 
-initialize_app(cred, {
-    'databaseURL': database_url
-})
+    # Initialize Firebase
+    if not firebase_admin._apps:
+        cred = credentials.Certificate(eval(FIREBASE_CRED_JSON))
+        firebase_admin.initialize_app(cred, {
+            'databaseURL': f"https://{cred.project_id}.firebaseio.com/"
+        })
 
-def check_reminders():
-    print("[✔] Reminder check started")
+    # Timezone
+    IST = pytz.timezone('Asia/Kolkata')
 
-    india_tz = pytz.timezone("Asia/Kolkata")
-    now = datetime.now(india_tz)
+    def send_message(mode, to, body):
+        client = Client(TWILIO_SID, TWILIO_TOKEN)
+        if mode == "sms":
+            client.messages.create(body=body, from_=TWILIO_FROM, to=to)
+        elif mode == "whatsapp":
+            client.messages.create(body=body, from_=f"whatsapp:{TWILIO_FROM}", to=f"whatsapp:{to}")
+        else:
+            print(f"[!] Unknown mode for {to}: {mode}")
 
-    ref = db.reference('customers')
-    customers = ref.get() or {}
+    def check_reminders():
+        print("[✔] Reminder check started")
+        ref = db.reference("customers")
+        customers = ref.get() or {}
 
-    for key, c in customers.items():
-        name = c.get("name", "Unknown")
-        mode = c.get("mode", "sms")
-        phone = c.get("phone", "N/A")
-        last_date = c.get("buy_date", "Unknown")
+        today = datetime.now(IST).date()
+        for key, c in customers.items():
+            try:
+                name = c.get("name", "Unknown")
+                phone = c.get("phone")
+                mode = c.get("mode", "sms")
+                last_date_str = c.get("buy_date")
 
-        if mode not in ["sms", "whatsapp"]:
-            print(f"[!] Unknown mode for {name}: {mode}")
+                if not (phone and last_date_str):
+                    continue
 
-    print("[✔] Reminder check finished")
+                last_date = datetime.strptime(last_date_str, "%Y-%m-%d").date()
+                days_diff = (today - last_date).days
+
+                if days_diff % 90 == 0:
+                    msg = f"Dear {name}, please check your battery water level today."
+                    send_message(mode, phone, msg)
+                    print(f"[→] Sent reminder to {name}")
+            except Exception as e:
+                print(f"[✖] Error processing {key}: {e}")
+""")
+
+# Save the content to a file
+scheduler_path = "/mnt/data/scheduler.py"
+with open(scheduler_path, "w") as f:
+    f.write(scheduler_py_content)
+
+scheduler_path
