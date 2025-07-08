@@ -2,7 +2,7 @@ name: Battery Reminder Scheduler
 
 on:
   schedule:
-    - cron: "30 4 * * *"
+    - cron: "30 4 * * *"  # Runs daily at 10:00 AM IST
   workflow_dispatch:
 
 jobs:
@@ -22,7 +22,7 @@ jobs:
       - name: Run reminder script
         run: python cron.py
         env:
-          FIREBASE_CRED_PATH: ${{ secrets.FIREBASE_CRED_PATH }}
+          FIREBASE_CRED_JSON: ${{ secrets.FIREBASE_CRED_JSON }}
           FERNET_KEY: ${{ secrets.FERNET_KEY }}
           TWILIO_SID: ${{ secrets.TWILIO_SID }}
           TWILIO_TOKEN: ${{ secrets.TWILIO_TOKEN }}
