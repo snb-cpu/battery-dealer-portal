@@ -29,11 +29,12 @@ def check_reminders():
     customers = ref.get() or {}
 
     for key, c in customers.items():
-        print(f"Checking: {c.get('name')} ({c.get('phone')})")
+        name = c.get("name", "Unknown")
+        mode = c.get("mode", "sms")
+        phone = c.get("phone", "N/A")
+        last_date = c.get("buy_date", "Unknown")
+
+        if mode not in ["sms", "whatsapp"]:
+            print(f"[!] Unknown mode for {name}: {mode}")
 
     print("[✔] Reminder check finished")
-
-                    print(f"[!] Unknown mode for {name}: {mode}")
-
-        except Exception as e:
-            print(f"[!] Error processing {key}: {e}")
