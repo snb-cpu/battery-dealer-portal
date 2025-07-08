@@ -2,7 +2,7 @@ name: Battery Reminder Scheduler
 
 on:
   schedule:
-    - cron: "30 4 * * *"  # Runs daily at 10:00 AM IST
+    - cron: "30 4 * * *"  # 10:00 AM IST
   workflow_dispatch:
 
 jobs:
@@ -27,4 +27,3 @@ jobs:
           TWILIO_SID: ${{ secrets.TWILIO_SID }}
           TWILIO_TOKEN: ${{ secrets.TWILIO_TOKEN }}
           TWILIO_FROM: ${{ secrets.TWILIO_FROM }}
-
