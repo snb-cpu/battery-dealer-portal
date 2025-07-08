@@ -1,74 +1,97 @@
-from textwrap import dedent
+import os
+import firebase_admin
+from firebase_admin import credentials, firestore
+from datetime import datetime, timedelta
+import pytz
+import json
+from encrypt_util import decrypt
 
-# Full corrected scheduler.py content with consistent indentation (spaces only)
-scheduler_py_content = dedent("""
-    import os
-    import firebase_admin
-    from firebase_admin import credentials, db
-    from datetime import datetime, timedelta
-    import pytz
-    from encrypt_util import decrypt_string
-    from twilio.rest import Client
+# --- Load environment variables ---
+firebase_cred_json = os.environ.get("FIREBASE_CRED_JSON")
+fernet_key = os.environ.get("FERNET_KEY")
+twilio_sid = os.environ.get("TWILIO_SID")
+twilio_token = os.environ.get("TWILIO_TOKEN")
+twilio_from = os.environ.get("TWILIO_FROM")
 
-    # Load environment variables
-    FIREBASE_CRED_JSON = os.getenv("FIREBASE_CRED_JSON")
-    FERNET_KEY = os.getenv("FERNET_KEY")
-    TWILIO_SID = os.getenv("TWILIO_SID")
-    TWILIO_TOKEN = os.getenv("TWILIO_TOKEN")
-    TWILIO_FROM = os.getenv("TWILIO_FROM")
+if not firebase_cred_json:
+    raise ValueError("Missing FIREBASE_CRED_JSON")
 
-    if not FIREBASE_CRED_JSON:
-        raise ValueError("Missing FIREBASE_CRED_JSON")
+# --- Initialize Firebase ---
+cred_dict = json.loads(firebase_cred_json)
+cred = credentials.Certificate(cred_dict)
+firebase_admin.initialize_app(cred)
+db = firestore.client()
 
-    # Initialize Firebase
-    if not firebase_admin._apps:
-        cred = credentials.Certificate(eval(FIREBASE_CRED_JSON))
-        firebase_admin.initialize_app(cred, {
-            'databaseURL': f"https://{cred.project_id}.firebaseio.com/"
-        })
+# --- Timezone and current date ---
+india_tz = pytz.timezone("Asia/Kolkata")
+now = datetime.now(india_tz)
+today = now.date()
 
-    # Timezone
-    IST = pytz.timezone('Asia/Kolkata')
+# --- Load users from Firebase ---
+def get_users():
+    users_ref = db.collection("users")
+    return [doc.to_dict() for doc in users_ref.stream()]
 
-    def send_message(mode, to, body):
-        client = Client(TWILIO_SID, TWILIO_TOKEN)
-        if mode == "sms":
-            client.messages.create(body=body, from_=TWILIO_FROM, to=to)
-        elif mode == "whatsapp":
-            client.messages.create(body=body, from_=f"whatsapp:{TWILIO_FROM}", to=f"whatsapp:{to}")
-        else:
-            print(f"[!] Unknown mode for {to}: {mode}")
+# --- Check and generate reminders ---
+def check_reminders():
+    users = get_users()
+    for user in users:
+        name = user.get("name", "Unknown")
+        phone = user.get("phone")
+        battery_date_str = user.get("battery_date")
+        mode = user.get("mode", "SMS")
+        encrypted = user.get("encrypted", True)
 
-    def check_reminders():
-        print("[✔] Reminder check started")
-        ref = db.reference("customers")
-        customers = ref.get() or {}
+        if not phone or not battery_date_str:
+            print(f"[-] Skipping incomplete user: {name}")
+            continue
 
-        today = datetime.now(IST).date()
-        for key, c in customers.items():
+        if encrypted:
             try:
-                name = c.get("name", "Unknown")
-                phone = c.get("phone")
-                mode = c.get("mode", "sms")
-                last_date_str = c.get("buy_date")
-
-                if not (phone and last_date_str):
-                    continue
-
-                last_date = datetime.strptime(last_date_str, "%Y-%m-%d").date()
-                days_diff = (today - last_date).days
-
-                if days_diff % 90 == 0:
-                    msg = f"Dear {name}, please check your battery water level today."
-                    send_message(mode, phone, msg)
-                    print(f"[→] Sent reminder to {name}")
+                phone = decrypt(phone, fernet_key)
+                battery_date_str = decrypt(battery_date_str, fernet_key)
             except Exception as e:
-                print(f"[✖] Error processing {key}: {e}")
-""")
+                print(f"[!] Failed to decrypt for {name}: {e}")
+                continue
 
-# Save the content to a file
-scheduler_path = "/mnt/data/scheduler.py"
-with open(scheduler_path, "w") as f:
-    f.write(scheduler_py_content)
+        try:
+            battery_date = datetime.strptime(battery_date_str, "%Y-%m-%d").date()
+        except:
+            print(f"[!] Invalid date for {name}: {battery_date_str}")
+            continue
 
-scheduler_path
+        # Reminder every 3 months
+        delta = (today - battery_date).days
+        if delta % 90 == 0:
+            message = f"Reminder: Check water level of battery registered on {battery_date_str}."
+            if mode == "SMS":
+                send_sms(phone, message)
+            elif mode == "WhatsApp":
+                send_whatsapp(phone, message)
+            else:
+                print(f"[!] Unknown mode for {name}: {mode}")
+
+# --- Twilio message functions ---
+from twilio.rest import Client
+
+def send_sms(to, body):
+    client = Client(twilio_sid, twilio_token)
+    try:
+        client.messages.create(body=body, from_=twilio_from, to=to)
+        print(f"[+] SMS sent to {to}")
+    except Exception as e:
+        print(f"[!] SMS failed to {to}: {e}")
+
+def send_whatsapp(to, body):
+    if not to.startswith("whatsapp:"):
+        to = f"whatsapp:{to}"
+    client = Client(twilio_sid, twilio_token)
+    try:
+        client.messages.create(body=body, from_=f"whatsapp:{twilio_from}", to=to)
+        print(f"[+] WhatsApp sent to {to}")
+    except Exception as e:
+        print(f"[!] WhatsApp failed to {to}: {e}")
+
+# --- Run if called directly ---
+if __name__ == "__main__":
+    check_reminders()
